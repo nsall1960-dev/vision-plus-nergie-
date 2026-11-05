@@ -356,7 +356,7 @@
   </a>
 
   <!-- JAVASCRIPT -->
-  <script>
+  <script><script>
 const contactForm = document.getElementById("form");
 
 if (contactForm) {
@@ -367,9 +367,9 @@ if (contactForm) {
         const whatsappLink = document.getElementById("whatsapp-after-submit");
         const button = contactForm.querySelector('button[type="submit"]');
 
+        button.disabled = true;
         status.textContent = "Envoi de votre demande...";
         whatsappLink.style.display = "none";
-        button.disabled = true;
 
         const formData = new FormData(contactForm);
 
@@ -379,31 +379,28 @@ if (contactForm) {
         const service = formData.get("service");
         const message = formData.get("message");
 
+        // Préparation des deux envois
+        const netlifyData = new URLSearchParams(formData).toString();
+
+        const emailData = Object.fromEntries(formData.entries());
+        delete emailData["bot-field"];
+        delete emailData["form-name"];
+
+        emailData._replyto = email;
+        emailData._subject = "Nouvelle demande - Vision Plus Énergies";
+
         try {
-            // 1. Envoi vers Netlify
-            const netlifyResponse = await fetch("/", {
+            // Envoi indépendant vers Netlify
+            const netlifyPromise = fetch("/", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/x-www-form-urlencoded"
                 },
-                body: new URLSearchParams(formData).toString()
+                body: netlifyData
             });
 
-            if (!netlifyResponse.ok) {
-                throw new Error("Échec de l'envoi vers Netlify.");
-            }
-
-            // 2. Préparation de l'envoi vers FormSubmit
-            const emailData = Object.fromEntries(formData.entries());
-
-            delete emailData["bot-field"];
-            delete emailData["form-name"];
-
-            emailData._replyto = email;
-            emailData._subject =
-                "Nouvelle demande - Vision Plus Énergies";
-
-            const emailResponse = await fetch(
+            // Envoi indépendant vers l'adresse e-mail
+            const emailPromise = fetch(
                 "https://formsubmit.co/ajax/sall.mamadou.niang@gmail.com",
                 {
                     method: "POST",
@@ -415,44 +412,75 @@ if (contactForm) {
                 }
             );
 
-            const emailResult = await emailResponse.json();
+            const results = await Promise.allSettled([
+                netlifyPromise,
+                emailPromise
+            ]);
 
-            if (!emailResponse.ok || emailResult.success !== "true") {
-                throw new Error("L'envoi de l'e-mail n'a pas été confirmé.");
+            const netlifyOK =
+                results[0].status === "fulfilled" &&
+                results[0].value.ok;
+
+            let emailOK = false;
+
+            if (results[1].status === "fulfilled") {
+                const response = results[1].value;
+
+                if (response.ok) {
+                    try {
+                        const result = await response.json();
+                        emailOK =
+                            result.success === true ||
+                            result.success === "true";
+                    } catch {
+                        emailOK = false;
+                    }
+                }
             }
 
-            status.textContent =
-                "Votre demande a bien été envoyée. Merci de votre confiance !";
+            if (netlifyOK && emailOK) {
+                status.textContent =
+                    "Votre demande a bien été envoyée. Merci de votre confiance !";
 
-            // 3. Préparation du message WhatsApp
-            const whatsappMessage =
-                `Bonjour Vision Plus Énergies !\n\n` +
-                `Nom : ${nom}\n` +
-                `E-mail : ${email}\n` +
-                `Téléphone : ${telephone}\n` +
-                `Service : ${service}\n` +
-                `Message : ${message}`;
+                contactForm.reset();
 
-            whatsappLink.href =
-                "https://wa.me/221784321845?text=" +
-                encodeURIComponent(whatsappMessage);
+                const whatsappMessage =
+                    `Bonjour Vision Plus Énergies !\n\n` +
+                    `Nom : ${nom}\n` +
+                    `E-mail : ${email}\n` +
+                    `Téléphone : ${telephone}\n` +
+                    `Service : ${service}\n` +
+                    `Message : ${message}`;
 
-            whatsappLink.style.display = "inline-block";
+                whatsappLink.href =
+                    "https://wa.me/221784321845?text=" +
+                    encodeURIComponent(whatsappMessage);
 
-            contactForm.reset();
+                whatsappLink.style.display = "inline-block";
+
+            } else if (netlifyOK) {
+                status.textContent =
+                    "Votre demande est enregistrée, mais l'envoi de l'e-mail n'a pas été confirmé.";
+
+            } else if (emailOK) {
+                status.textContent =
+                    "Votre demande a été envoyée par e-mail, mais son enregistrement sur Netlify a échoué.";
+
+            } else {
+                status.textContent =
+                    "L'envoi a échoué. Veuillez réessayer.";
+            }
 
         } catch (error) {
-            console.error(error);
-
-            status.textContent =
-                "Une erreur est survenue. Vérifiez votre connexion ou réessayez.";
+            console.error("Erreur :", error);
+            status.textContent = "Une erreur est survenue lors de l'envoi.";
 
         } finally {
             button.disabled = false;
         }
     });
 }
-
+</script>
 </script>
 
 </body>
